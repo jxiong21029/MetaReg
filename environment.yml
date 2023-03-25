@@ -1,0 +1,20 @@
+name: MetaReg
+channels:
+  - pytorch
+  - conda-forge
+dependencies:
+  - black
+  - isort
+  - jax
+  - matplotlib
+  - pytest
+  - pytorch
+  - seaborn
+  - torchvision
+  - tqdm
+  - pip
+  - pip:
+      - chex
+      - flax
+      - optax
+      - ray[default]

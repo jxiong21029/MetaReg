@@ -34,42 +34,35 @@ class RunningMoments:
 
 class Logger:
     def __init__(self):
-        self._buffer_data = defaultdict(RunningMoments)
-        self.cumulative_data = defaultdict(list)
+        self.buffer = defaultdict(RunningMoments)
+
+        self.data = defaultdict(list)
+        self.std_data = defaultdict(list)
+
         self.seen_plot_directories = set()
 
     # log metrics reported once per epoch
     def log(self, metrics=None, **kwargs):
         metrics = {} if metrics is None else metrics
-        for k, v in (metrics | kwargs).items():
+        for k, v in {**metrics, **kwargs}.items():
             if hasattr(v, "shape"):
                 v = v.item()
-            self.cumulative_data[k].append(v)
+            self.data[k].append(v)
 
     # push metrics logged many times per epoch, to aggregate later
     def push(self, metrics=None, **kwargs):
         metrics = {} if metrics is None else metrics
-        for k, v in (metrics | kwargs).items():
+        for k, v in {**metrics, **kwargs}.items():
             if hasattr(v, "shape"):
                 v = v.item()
-            self._buffer_data[k].push(v)
+            self.buffer[k].push(v)
 
     # computes mean and std of metrics pushed many times per epoch
     def step(self):
-        for k, v in self._buffer_data.items():
-            self.cumulative_data[k + "_mean"].append(v.mean())
-            self.cumulative_data[k + "_std"].append(v.std())
-        self._buffer_data.clear()
-
-    def tune_report(self):
-        from ray import tune
-
-        tune.report(**{k: v[-1] for k, v in self.cumulative_data.items()})
-
-    def air_report(self, **kwargs):
-        from ray.air import session
-
-        session.report({k: v[-1] for k, v in self.cumulative_data.items()}, **kwargs)
+        for k, v in self.buffer.items():
+            self.data[k].append(v.mean())
+            self.std_data[k].append(v.std())
+        self.buffer.clear()
 
     def save(self, filename):
         if not filename.endswith(".pickle"):
@@ -86,59 +79,34 @@ class Logger:
         sns.set_theme()
 
         if dirname not in self.seen_plot_directories:
+            self.seen_plot_directories.add(dirname)
             os.makedirs(dirname, exist_ok=True)
 
             for filename in os.listdir(dirname):
                 file_path = os.path.join(dirname, filename)
                 if os.path.isfile(file_path) or os.path.islink(file_path):
                     os.unlink(file_path)
-            self.seen_plot_directories.add(dirname)
 
-        for k, v in self.cumulative_data.items():
-            if k.endswith("_std"):
-                continue
-
+        for name, values in self.data.items():
             fig, ax = plt.subplots()
+            fig: plt.Figure
+            ax: plt.Axes
 
-            x = np.arange(len(self.cumulative_data[k]))
-            v = np.array(v)
-            if k.endswith("_mean"):
-                name = k[:-5]
+            x = np.arange(len(self.data[name]))
+            values = np.array(values)
 
-                (line,) = ax.plot(x, v, label=k)
-                stds = np.array(self.cumulative_data[name + "_std"])
+            (line,) = ax.plot(x, values)
+            if name in self.std_data:
+                stds = np.array(self.std_data[name])
                 ax.fill_between(
-                    x, v - stds, v + stds, color=line.get_color(), alpha=0.15
+                    x, values - stds, values + stds, color=line.get_color(), alpha=0.3
                 )
-            else:
-                name = k
-                (line,) = ax.plot(x, v)
-            ax.scatter(x, v, color=line.get_color())
 
-            fig.suptitle(name)
+            if len(values) <= 100:  # add thick circles for clarity
+                ax.scatter(x, values, color=line.get_color())
+
+            ax.set_title(name.replace("_", " "))
+            ax.set_xlabel("epochs")
+
             fig.savefig(os.path.join(dirname, name))
             plt.close(fig)
-
-    def convergence(self, key, p=0.98):
-        """Estimates the degree to which some metric has converged.
-
-        A custom metric created by Jerry Xiong. Close to zero when the metric is clearly
-        trending upwards or downwards, and close to one when changes in the metric seem
-        to be dominated by noise. Intended for debugging.
-
-        Higher p corresponds to higher weight placed on the last few measurements.
-        """
-        assert key in self.cumulative_data
-
-        data = self.cumulative_data[key]
-        if len(data) <= 1:
-            return 0
-
-        diffs = np.array([data[i + 1] - data[i] for i in range(len(data) - 1)])
-        w = np.power((1 - p), (1 - np.linspace(0, 1, num=len(diffs))))
-        w = w / np.sum(w)
-
-        m = np.sum(w * diffs)
-        v = np.sum(w * diffs * diffs)
-
-        return 1 - abs(m) / math.sqrt(v + 1e-8)

@@ -134,15 +134,8 @@ class ResultReporter:
         metrics = list(self.results.values())[0].data.keys()
         if not self.cleared_plots and os.path.exists(directory_name):
             self.cleared_plots = True
-            # print("DELETING ALL")
             shutil.rmtree(directory_name)
         os.makedirs(directory_name, exist_ok=True)
-        # print(
-        #     "BEGIN PLOTTING IN:",
-        #     directory_name,
-        #     "CURRENT FILES:",
-        #     os.listdir(directory_name),
-        # )
 
         for metric in metrics:
             for task in set(config.task_key for config in self.results.keys()):
@@ -160,7 +153,6 @@ class ResultReporter:
                     title = metric
 
                 for config in self.results.keys():
-                    # print(config, self.finished)
                     if config.task_key == task and config not in self.finished:
                         title += " (in progress)"
                         break
@@ -241,24 +233,12 @@ class ResultReporter:
                 )
                 dirname, filename = os.path.split(path)
                 os.makedirs(dirname, exist_ok=True)
-                # print("SAVING", path)
                 fig.savefig(path, bbox_inches="tight")
-                # print("SUCCESSFULLY SAVED", path)
-                # print(path, f"ATTEMPTING DELETE", path + '_(in_progress).png')
                 if not path.endswith("(in_progress)") and os.path.exists(
                     path + "_(in_progress).png"
                 ):
                     os.remove(path + "_(in_progress).png")
-                    # print(
-                    #     "SUCCESSFULLY DELETED", path[: len(" (in progress)")] + ".png"
-                    # )
                 plt.close(fig)
-                # print(
-                #     "AFTERMATH, DIRECTORY:",
-                #     directory_name,
-                #     "WITH FILES:",
-                #     os.listdir(directory_name),
-                # )
 
     def serializable(self):
         return {
@@ -288,13 +268,11 @@ class Tuner:
             try:
                 handles = []
                 for result in trial_fn(config.cfg_dict):
-                    # print("ADDING RESULT", result)
                     handles.append(reporter.add_result.remote(config, result))
                 ray.get(handles)
             except Exception as e:
                 print(f"Trial config={config_name(config)} failed with exception {e}")
             finally:
-                # print("SETTING DONE")
                 ray.get(reporter.set_done.remote(config))
 
         self.reporter = remote_reporter.remote(self.spec, self.metric, self.mode)
